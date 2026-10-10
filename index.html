@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="無音カメラ">
+  <meta name="theme-color" content="#000000">
+  <title>無音カメラ</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="camera">
+    <header id="topbar">
+      <button id="btn-grid" class="chip" aria-pressed="false">グリッド</button>
+      <button id="btn-timer" class="chip" aria-pressed="false">タイマー オフ</button>
+      <button id="btn-torch" class="chip" aria-pressed="false" hidden>ライト</button>
+      <button id="btn-lens" class="chip" hidden>レンズ</button>
+    </header>
+
+    <div id="stage">
+      <div id="frame">
+        <video id="preview" autoplay playsinline muted></video>
+        <div id="grid" hidden></div>
+        <div id="flash"></div>
+      </div>
+      <div id="countdown" hidden></div>
+      <div id="rec-indicator" hidden><span class="dot"></span><span id="rec-time">00:00</span></div>
+      <div id="zoom-label" hidden></div>
+      <div id="zoom-bar" hidden>
+        <input id="zoom" type="range" min="1" max="2" step="0.1" value="1" aria-label="ズーム">
+      </div>
+      <div id="lens-menu" hidden></div>
+      <div id="message" hidden>
+        <p id="message-text"></p>
+        <button id="btn-retry" class="btn primary">再試行</button>
+      </div>
+    </div>
+
+    <footer id="controls">
+      <div id="modes">
+        <button class="mode active" data-mode="photo">写真</button>
+        <button class="mode" data-mode="video">ビデオ</button>
+      </div>
+      <div id="shutter-row">
+        <button id="btn-gallery" aria-label="ライブラリ">
+          <img id="thumb" alt="" hidden>
+          <span id="badge" hidden></span>
+        </button>
+        <button id="btn-shutter" aria-label="撮影"><span></span></button>
+        <button id="btn-flip" aria-label="カメラ切り替え">
+          <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/>
+            <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/>
+          </svg>
+        </button>
+      </div>
+    </footer>
+  </main>
+
+  <section id="gallery" hidden>
+    <header class="sheet-header">
+      <button id="btn-gallery-close" class="link">閉じる</button>
+      <h1 id="gallery-title">ライブラリ</h1>
+      <button id="btn-select" class="link">選択</button>
+    </header>
+    <p class="hint">「保存」を押すと共有シートが開きます。「画像を保存」/「ビデオを保存」で写真アプリに入ります。</p>
+    <div id="gallery-grid"></div>
+    <p id="gallery-empty" hidden>まだ撮影していません</p>
+    <footer class="sheet-footer">
+      <button id="btn-save-main" class="btn primary"></button>
+      <button id="btn-delete-main" class="btn danger"></button>
+    </footer>
+  </section>
+
+  <section id="viewer" hidden>
+    <header class="sheet-header">
+      <button id="btn-viewer-close" class="link">戻る</button>
+      <span id="viewer-info"></span>
+      <span></span>
+    </header>
+    <div id="viewer-media"></div>
+    <footer class="sheet-footer">
+      <button id="btn-viewer-save" class="btn primary">保存</button>
+      <button id="btn-viewer-delete" class="btn danger">削除</button>
+    </footer>
+  </section>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

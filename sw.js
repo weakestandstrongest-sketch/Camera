@@ -1,6 +1,6 @@
 // オフラインでも起動できるように画面のファイルをキャッシュする。
 // 表示はキャッシュから即座に行い、裏で最新版を取得して次回起動時に反映する。
-const CACHE = 'silent-camera-v3';
+const CACHE = 'silent-camera-v4';
 const ASSETS = [
   './',
   './index.html',

@@ -57,12 +57,18 @@ const MAX_ZOOM = 10;
 
 /* ---------- 設定（この端末のブラウザにだけ保存） ---------- */
 
+// 同じサイト（github.io）のほかのアプリと名前がぶつからないよう、アプリ名を付けたキーに保存する
+const PREFS_KEY = 'silent-camera:prefs';
 const prefs = loadPrefs();
 
 function loadPrefs() {
   const defaults = { grid: false, timer: 0, facing: 'environment' };
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem('prefs') || '{}') };
+    const raw = localStorage.getItem(PREFS_KEY) || localStorage.getItem('prefs') || '{}'; // 'prefs' は以前の保存先
+    const p = { ...defaults, ...JSON.parse(raw) };
+    if (!TIMERS.includes(p.timer)) p.timer = 0;
+    if (p.facing !== 'user') p.facing = 'environment';
+    return { grid: !!p.grid, timer: p.timer, facing: p.facing };
   } catch {
     return defaults;
   }
@@ -70,7 +76,7 @@ function loadPrefs() {
 
 function savePrefs() {
   try {
-    localStorage.setItem('prefs', JSON.stringify(prefs));
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // 保存できなくても動作には影響しない
   }
@@ -426,7 +432,14 @@ async function startRecording() {
     if (e.data && e.data.size) recChunks.push(e.data);
   };
   rec.onstop = () => finishRecording(rec, mime);
-  rec.start(1000);
+  try {
+    rec.start(1000);
+  } catch (err) {
+    // マイクなしの映像に音声コーデックを指定したときなど、開始の時点で失敗することがある
+    console.error(err);
+    toast('録画を開始できませんでした');
+    return;
+  }
 
   recorder = rec;
   recStartedAt = Date.now();

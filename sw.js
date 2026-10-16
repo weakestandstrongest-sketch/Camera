@@ -1,6 +1,6 @@
 // オフラインでも起動できるように画面のファイルをキャッシュする。
 // 表示はキャッシュから即座に行い、裏で最新版を取得して次回起動時に反映する。
-const CACHE = 'silent-camera-v2';
+const CACHE = 'silent-camera-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -19,7 +19,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      // 同じサイト（github.io）にあるほかのアプリ（ひび手帳・凪・Orb など）のキャッシュは消さない
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('silent-camera-') && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });

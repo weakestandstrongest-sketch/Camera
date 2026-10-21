@@ -213,22 +213,6 @@ button:disabled {
   pointer-events: none;
 }
 
-#zoom-bar {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  width: min(70%, 320px);
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
-}
-
-#zoom {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
 #lens-menu {
   position: absolute;
   top: 8px;

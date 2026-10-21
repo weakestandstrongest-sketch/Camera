@@ -19,8 +19,6 @@ const els = {
   rec: $('#rec-indicator'),
   recTime: $('#rec-time'),
   zoomLabel: $('#zoom-label'),
-  zoomBar: $('#zoom-bar'),
-  zoom: $('#zoom'),
   lensMenu: $('#lens-menu'),
   message: $('#message'),
   messageText: $('#message-text'),
@@ -98,6 +96,7 @@ let track = null;
 let startSeq = 0;
 let lenses = [];
 let zoomCaps = null;
+let zoomMax = 1;
 let currentZoom = 1;
 let zoomFrame = null;
 let torchOn = false;
@@ -212,13 +211,9 @@ function setupCapabilities() {
   const caps = track?.getCapabilities?.() || {};
 
   zoomCaps = caps.zoom && caps.zoom.max > caps.zoom.min ? caps.zoom : null;
-  els.zoomBar.hidden = !zoomCaps;
   if (zoomCaps) {
-    els.zoom.min = zoomCaps.min;
-    els.zoom.max = Math.min(zoomCaps.max, MAX_ZOOM);
-    els.zoom.step = zoomCaps.step || 0.1;
+    zoomMax = Math.min(zoomCaps.max, MAX_ZOOM);
     currentZoom = track.getSettings().zoom ?? zoomCaps.min;
-    els.zoom.value = currentZoom;
   }
 
   torchOn = false;
@@ -228,8 +223,7 @@ function setupCapabilities() {
 
 function setZoom(z, showLabel = true) {
   if (!zoomCaps || !track) return;
-  currentZoom = Math.min(Math.max(z, zoomCaps.min), Number(els.zoom.max));
-  els.zoom.value = currentZoom;
+  currentZoom = Math.min(Math.max(z, zoomCaps.min), zoomMax);
   if (showLabel) showZoomLabel();
   if (zoomFrame == null) {
     zoomFrame = requestAnimationFrame(() => {
@@ -873,8 +867,6 @@ function bindEvents() {
   document.addEventListener('click', (e) => {
     if (!els.lensMenu.hidden && !els.lensMenu.contains(e.target)) closeLensMenu();
   });
-
-  els.zoom.addEventListener('input', () => setZoom(Number(els.zoom.value)));
 
   // ピンチでズーム
   let pinch = null;

@@ -199,15 +199,62 @@ async function startCamera() {
   refreshLenses();
 }
 
-// カメラの起動・切り替え直後は、iPhone が一瞬ちがう映像サイズを報告してから落ち着く。
-// そのたびに枠の大きさを変えるとがくっとするので、サイズが落ち着くまで待ち、その間はぼかしで隠す
+// カメラの起動・切り替え直後は、iPhone が一瞬ちがう形の映像サイズを報告してから落ち着く
+// （落ち着くまでの時間はまちまち）。それに合わせて枠を変えると縮んでから伸びてがくっとするので、
+// 枠はモードの形（写真 3:4、ビデオ 9:16）へすぐに変え、その形に合わない途中のサイズは無視する。
+// 切り替えの間はぼかしで隠す。
+const MODE_ASPECT = { photo: 4 / 3, video: 16 / 9 }; // 長辺 / 短辺
+const SETTLE_FALLBACK_MS = 1500;
+const SETTLE_GIVE_UP_MS = 4000;
 let settleTimer = null;
+let switchStartedAt = 0;
+let fallbackTimer = null;
 let veilTimer = null;
+let frameDims = null;
+
+function isPortraitScreen() {
+  return window.innerHeight >= window.innerWidth;
+}
+
+function expectedDims() {
+  const a = MODE_ASPECT[mode];
+  return isPortraitScreen() ? [1, a] : [a, 1];
+}
+
+function matchesMode(w, h) {
+  if (!w || !h) return false;
+  const a = Math.max(w, h) / Math.min(w, h);
+  return Math.abs(a - MODE_ASPECT[mode]) < 0.06 && (h >= w) === isPortraitScreen();
+}
+
+// 前のモードの形のままか、画面と縦横が逆なら、まだ切り替えの途中とみなす
+function looksTransient(w, h) {
+  const a = Math.max(w, h) / Math.min(w, h);
+  const other = MODE_ASPECT[mode === 'photo' ? 'video' : 'photo'];
+  return Math.abs(a - other) < 0.06 || (h >= w) !== isPortraitScreen();
+}
 
 function startSwitch() {
   els.veil.classList.add('on');
   clearTimeout(veilTimer);
-  veilTimer = setTimeout(endSwitch, 2500);
+  veilTimer = setTimeout(endSwitch, SETTLE_GIVE_UP_MS + 500);
+  fitFrame(expectedDims());
+  switchStartedAt = performance.now();
+  clearTimeout(fallbackTimer);
+  fallbackTimer = setTimeout(settleFallback, SETTLE_FALLBACK_MS);
+}
+
+// 想定と違う形のカメラ（パソコンのカメラなど）でも、少し待てば実際の形に合わせる。
+// ただし切り替え途中に見えるサイズなら、あきらめる時間までは待ち続ける
+function settleFallback() {
+  const w = els.video.videoWidth;
+  const h = els.video.videoHeight;
+  const waited = performance.now() - switchStartedAt;
+  if (w && (!looksTransient(w, h) || waited >= SETTLE_GIVE_UP_MS)) {
+    settle([w, h]);
+    return;
+  }
+  if (waited < SETTLE_GIVE_UP_MS) fallbackTimer = setTimeout(settleFallback, 300);
 }
 
 function endSwitch() {
@@ -216,14 +263,20 @@ function endSwitch() {
 }
 
 function scheduleSettle() {
+  const w = els.video.videoWidth;
+  const h = els.video.videoHeight;
   clearTimeout(settleTimer);
-  settleTimer = setTimeout(() => {
-    if (!els.video.videoWidth) return;
-    fitFrame();
-    updateHud();
-    setTimeout(endSwitch, 150);
-    cameraReady();
-  }, 350);
+  if (!matchesMode(w, h)) return; // 途中のサイズ。落ち着くか、待ちきれなくなるまで待つ
+  settleTimer = setTimeout(() => settle([w, h]), 150);
+}
+
+function settle(dims) {
+  clearTimeout(settleTimer);
+  clearTimeout(fallbackTimer);
+  fitFrame(dims);
+  updateHud();
+  setTimeout(endSwitch, 150);
+  cameraReady();
 }
 
 function videoConstraints() {
@@ -275,9 +328,9 @@ function guessFacing(label = '') {
 // プレビュー枠を映像と同じ縦横比にして、写る範囲＝保存される範囲にする
 // 横幅いっぱいに表示する。ボタンの上に収まるなら上の空きの中央に、
 // 収まらない（ビデオの縦長映像など）ならボタンの裏まで伸ばす
-function fitFrame() {
-  const vw = els.video.videoWidth || 3;
-  const vh = els.video.videoHeight || 4;
+function fitFrame(dims = frameDims || expectedDims()) {
+  frameDims = dims;
+  const [vw, vh] = dims;
   const cs = getComputedStyle(els.stage);
   const sw = els.stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   const sh = els.stage.clientHeight;
@@ -1356,7 +1409,11 @@ function bindEvents() {
 
   els.video.addEventListener('loadedmetadata', scheduleSettle);
   els.video.addEventListener('resize', scheduleSettle);
-  window.addEventListener('resize', fitFrame);
+  window.addEventListener('resize', () => fitFrame());
+  // 枠の大きさのアニメーションが終わってから、日付スタンプを新しい大きさで描き直す
+  els.frame.addEventListener('transitionend', (e) => {
+    if (e.target === els.frame && e.propertyName === 'height') drawPreviewStamp();
+  });
 
   els.btnGalleryClose.addEventListener('click', closeGallery);
   els.btnSelect.addEventListener('click', () => setSelectMode(!selectMode));
@@ -1395,7 +1452,7 @@ function bindEvents() {
 async function init() {
   buildLooks();
   applyPrefsUI();
-  fitFrame();
+  fitFrame(expectedDims());
   bindEvents();
 
   try {

@@ -10,14 +10,22 @@
 const $ = (sel) => document.querySelector(sel);
 
 const els = {
+  camera: $('#camera'),
   stage: $('#stage'),
   frame: $('#frame'),
   video: $('#preview'),
   grid: $('#grid'),
   flash: $('#flash'),
   countdown: $('#countdown'),
-  rec: $('#rec-indicator'),
-  recTime: $('#rec-time'),
+  status: $('#status'),
+  statusText: $('#status-text'),
+  hudRes: $('#hud-res'),
+  hudZoom: $('#hud-zoom'),
+  datestamp: $('#datestamp'),
+  lookVignette: $('#look-vignette'),
+  lookGrain: $('#look-grain'),
+  lookName: $('#look-name'),
+  looks: $('#looks'),
   zoomLabel: $('#zoom-label'),
   lensMenu: $('#lens-menu'),
   message: $('#message'),
@@ -25,6 +33,8 @@ const els = {
   btnRetry: $('#btn-retry'),
   btnGrid: $('#btn-grid'),
   btnTimer: $('#btn-timer'),
+  timerBadge: $('#timer-badge'),
+  btnDate: $('#btn-date'),
   btnTorch: $('#btn-torch'),
   btnLens: $('#btn-lens'),
   modes: document.querySelectorAll('.mode'),
@@ -34,7 +44,7 @@ const els = {
   badge: $('#badge'),
   btnFlip: $('#btn-flip'),
   gallery: $('#gallery'),
-  galleryTitle: $('#gallery-title'),
+  galleryCount: $('#gallery-count'),
   galleryGrid: $('#gallery-grid'),
   galleryEmpty: $('#gallery-empty'),
   btnGalleryClose: $('#btn-gallery-close'),
@@ -53,6 +63,17 @@ const els = {
 const TIMERS = [0, 3, 10];
 const MAX_ZOOM = 10;
 
+// フィルター。css はプレビュー用で、写真にも同じ色の変換をかける
+const LOOKS = [
+  { id: 'none', name: 'ORIGINAL', css: '' },
+  { id: 'film', name: 'FILM', css: 'sepia(0.22) saturate(1.15) contrast(0.95) brightness(1.04)', vignette: 0.35, grain: 0.35 },
+  { id: 'fade', name: 'FADE', css: 'contrast(0.82) brightness(1.1) saturate(0.75) hue-rotate(-10deg)', grain: 0.2 },
+  { id: 'mono', name: 'MONO', css: 'grayscale(1) contrast(1.12) brightness(1.02)', grain: 0.4 },
+  { id: 'noir', name: 'NOIR', css: 'grayscale(1) contrast(1.55) brightness(0.88)', vignette: 0.5, grain: 0.45 },
+  { id: 'vivid', name: 'VIVID', css: 'saturate(1.45) contrast(1.08)' },
+  { id: 'dusk', name: 'DUSK', css: 'sepia(0.3) hue-rotate(-30deg) saturate(1.25) contrast(1.05)', vignette: 0.3 },
+];
+
 /* ---------- 設定（この端末のブラウザにだけ保存） ---------- */
 
 // 同じサイト（github.io）のほかのアプリと名前がぶつからないよう、アプリ名を付けたキーに保存する
@@ -60,13 +81,14 @@ const PREFS_KEY = 'silent-camera:prefs';
 const prefs = loadPrefs();
 
 function loadPrefs() {
-  const defaults = { grid: false, timer: 0, facing: 'environment' };
+  const defaults = { grid: false, timer: 0, facing: 'environment', look: 'none', date: false };
   try {
     const raw = localStorage.getItem(PREFS_KEY) || localStorage.getItem('prefs') || '{}'; // 'prefs' は以前の保存先
     const p = { ...defaults, ...JSON.parse(raw) };
     if (!TIMERS.includes(p.timer)) p.timer = 0;
     if (p.facing !== 'user') p.facing = 'environment';
-    return { grid: !!p.grid, timer: p.timer, facing: p.facing };
+    if (!LOOKS.some((l) => l.id === p.look)) p.look = 'none';
+    return { grid: !!p.grid, timer: p.timer, facing: p.facing, look: p.look, date: !!p.date };
   } catch {
     return defaults;
   }
@@ -83,8 +105,13 @@ function savePrefs() {
 function applyPrefsUI() {
   els.grid.hidden = !prefs.grid;
   els.btnGrid.setAttribute('aria-pressed', String(prefs.grid));
-  els.btnTimer.textContent = prefs.timer ? `タイマー ${prefs.timer}秒` : 'タイマー オフ';
+  els.timerBadge.hidden = !prefs.timer;
+  els.timerBadge.textContent = prefs.timer;
   els.btnTimer.setAttribute('aria-pressed', String(prefs.timer > 0));
+  els.btnTimer.setAttribute('aria-label', prefs.timer ? `セルフタイマー ${prefs.timer}秒` : 'セルフタイマー オフ');
+  els.btnDate.setAttribute('aria-pressed', String(prefs.date));
+  applyLook();
+  drawPreviewStamp();
 }
 
 /* ---------- カメラ ---------- */
@@ -173,6 +200,7 @@ async function startCamera() {
   if (noMic) toast('マイクが使えないため音声なしで録画します');
   fitFrame();
   setupCapabilities();
+  updateHud();
   refreshLenses();
 }
 
@@ -201,10 +229,13 @@ function fitFrame() {
   const vw = els.video.videoWidth;
   const vh = els.video.videoHeight;
   if (!vw || !vh) return;
-  const { width: sw, height: sh } = els.stage.getBoundingClientRect();
+  const cs = getComputedStyle(els.stage);
+  const sw = els.stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const sh = els.stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   const scale = Math.min(sw / vw, sh / vh);
   els.frame.style.width = `${Math.floor(vw * scale)}px`;
   els.frame.style.height = `${Math.floor(vh * scale)}px`;
+  drawPreviewStamp();
 }
 
 function setupCapabilities() {
@@ -237,6 +268,7 @@ let zoomLabelTimer = null;
 function showZoomLabel() {
   els.zoomLabel.textContent = `${currentZoom.toFixed(1)}×`;
   els.zoomLabel.hidden = false;
+  updateHud();
   clearTimeout(zoomLabelTimer);
   zoomLabelTimer = setTimeout(() => { els.zoomLabel.hidden = true; }, 900);
 }
@@ -290,6 +322,7 @@ function flipCamera() {
   const current = els.video.classList.contains('mirror') ? 'user' : 'environment';
   prefs.facing = current === 'user' ? 'environment' : 'user';
   deviceId = null;
+  els.btnFlip.classList.toggle('spin');
   savePrefs();
   startCamera();
 }
@@ -300,7 +333,316 @@ function setMode(next) {
   els.modes.forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
   els.shutter.classList.toggle('video-mode', mode === 'video');
   els.shutter.setAttribute('aria-label', mode === 'video' ? '録画開始' : '撮影');
+  els.camera.classList.toggle('mode-photo', mode === 'photo');
+  els.camera.classList.toggle('mode-video', mode === 'video');
+  applyLook();
+  drawPreviewStamp();
   startCamera();
+}
+
+/* ---------- フィルター・日付スタンプ・画面上の表示 ---------- */
+
+function currentLook() {
+  return LOOKS.find((l) => l.id === prefs.look) || LOOKS[0];
+}
+
+function buildLooks() {
+  const buttons = LOOKS.map((look) => {
+    const b = document.createElement('button');
+    b.className = 'look';
+    b.dataset.look = look.id;
+    b.setAttribute('role', 'radio');
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.filter = look.css || 'none';
+    b.append(swatch, look.name);
+    b.addEventListener('click', () => setLook(look.id));
+    return b;
+  });
+  els.looks.replaceChildren(...buttons);
+  els.lookGrain.style.backgroundImage = `url(${grainTile().toDataURL('image/png')})`;
+}
+
+function setLook(id, announce = false) {
+  if (prefs.look === id) return;
+  prefs.look = id;
+  savePrefs();
+  applyLook();
+  if (announce) showLookName();
+}
+
+function stepLook(delta) {
+  const i = LOOKS.findIndex((l) => l.id === prefs.look);
+  setLook(LOOKS[(i + delta + LOOKS.length) % LOOKS.length].id, true);
+}
+
+// ビデオにはフィルターがかからないので、ビデオモードではプレビューも素の映像にする
+function applyLook() {
+  const look = currentLook();
+  const shown = mode === 'photo' ? look : LOOKS[0];
+  els.video.style.filter = shown.css;
+  els.lookVignette.style.opacity = shown.vignette || 0;
+  els.lookGrain.style.opacity = shown.grain || 0;
+  for (const b of els.looks.children) {
+    const on = b.dataset.look === look.id;
+    b.setAttribute('aria-checked', String(on));
+    if (on && els.looks.scrollWidth > els.looks.clientWidth) {
+      els.looks.scrollTo({ left: b.offsetLeft - (els.looks.clientWidth - b.offsetWidth) / 2, behavior: 'smooth' });
+    }
+  }
+}
+
+let lookNameTimer = null;
+function showLookName() {
+  els.lookName.textContent = currentLook().name;
+  els.lookName.classList.add('show');
+  clearTimeout(lookNameTimer);
+  lookNameTimer = setTimeout(() => els.lookName.classList.remove('show'), 700);
+}
+
+function updateHud() {
+  const vw = els.video.videoWidth;
+  const vh = els.video.videoHeight;
+  const lens = els.video.classList.contains('mirror') ? 'FRONT' : 'BACK';
+  els.hudRes.textContent = vw ? `${lens}  ${vw}×${vh}` : '';
+  els.hudZoom.textContent = zoomCaps ? `${currentZoom.toFixed(1)}×` : '';
+}
+
+let grainCanvas = null;
+function grainTile() {
+  if (!grainCanvas) {
+    const size = 128;
+    grainCanvas = document.createElement('canvas');
+    grainCanvas.width = size;
+    grainCanvas.height = size;
+    const ctx = grainCanvas.getContext('2d');
+    const img = ctx.createImageData(size, size);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = 128 + (Math.random() - 0.5) * 170;
+      img.data[i] = v;
+      img.data[i + 1] = v;
+      img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  return grainCanvas;
+}
+
+// canvas の filter に対応しているか（Safari は版によって未対応）を実際に描いて確かめる
+let canvasFilterOK = null;
+function canvasFilterWorks() {
+  if (canvasFilterOK == null) {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 1;
+      c.height = 1;
+      const ctx = c.getContext('2d');
+      ctx.filter = 'grayscale(1)';
+      ctx.fillStyle = '#f00';
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g] = ctx.getImageData(0, 0, 1, 1).data;
+      canvasFilterOK = Math.abs(r - g) < 12;
+    } catch {
+      canvasFilterOK = false;
+    }
+  }
+  return canvasFilterOK;
+}
+
+// CSS の filter 関数（仕様の行列）を 1 つの色変換行列 [3x4] にまとめる
+function cssFilterMatrix(css) {
+  let m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0];
+  const mul = (a, b) => {
+    const r = new Array(12);
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 4; j++) {
+        let v = j === 3 ? a[i * 4 + 3] : 0;
+        for (let k = 0; k < 3; k++) v += a[i * 4 + k] * b[k * 4 + j];
+        r[i * 4 + j] = v;
+      }
+    }
+    return r;
+  };
+  for (const [, fn, arg] of css.matchAll(/([a-z-]+)\(([^)]+)\)/g)) {
+    const v = parseFloat(arg);
+    let f;
+    if (fn === 'brightness') {
+      f = [v, 0, 0, 0, 0, v, 0, 0, 0, 0, v, 0];
+    } else if (fn === 'contrast') {
+      const o = 0.5 - 0.5 * v;
+      f = [v, 0, 0, o, 0, v, 0, o, 0, 0, v, o];
+    } else if (fn === 'saturate') {
+      f = [
+        0.213 + 0.787 * v, 0.715 - 0.715 * v, 0.072 - 0.072 * v, 0,
+        0.213 - 0.213 * v, 0.715 + 0.285 * v, 0.072 - 0.072 * v, 0,
+        0.213 - 0.213 * v, 0.715 - 0.715 * v, 0.072 + 0.928 * v, 0,
+      ];
+    } else if (fn === 'grayscale') {
+      const a = 1 - Math.min(1, v);
+      f = [
+        0.2126 + 0.7874 * a, 0.7152 - 0.7152 * a, 0.0722 - 0.0722 * a, 0,
+        0.2126 - 0.2126 * a, 0.7152 + 0.2848 * a, 0.0722 - 0.0722 * a, 0,
+        0.2126 - 0.2126 * a, 0.7152 - 0.7152 * a, 0.0722 + 0.9278 * a, 0,
+      ];
+    } else if (fn === 'sepia') {
+      const a = 1 - Math.min(1, v);
+      f = [
+        0.393 + 0.607 * a, 0.769 - 0.769 * a, 0.189 - 0.189 * a, 0,
+        0.349 - 0.349 * a, 0.686 + 0.314 * a, 0.168 - 0.168 * a, 0,
+        0.272 - 0.272 * a, 0.534 - 0.534 * a, 0.131 + 0.869 * a, 0,
+      ];
+    } else if (fn === 'hue-rotate') {
+      const rad = (v * Math.PI) / 180;
+      const c = Math.cos(rad);
+      const sn = Math.sin(rad);
+      f = [
+        0.213 + c * 0.787 - sn * 0.213, 0.715 - c * 0.715 - sn * 0.715, 0.072 - c * 0.072 + sn * 0.928, 0,
+        0.213 - c * 0.213 + sn * 0.143, 0.715 + c * 0.285 + sn * 0.14, 0.072 - c * 0.072 - sn * 0.283, 0,
+        0.213 - c * 0.213 - sn * 0.787, 0.715 - c * 0.715 + sn * 0.715, 0.072 + c * 0.928 + sn * 0.072, 0,
+      ];
+    } else {
+      continue;
+    }
+    m = mul(f, m);
+  }
+  return m;
+}
+
+function applyMatrix(ctx, w, h, m) {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const o0 = m[3] * 255;
+  const o1 = m[7] * 255;
+  const o2 = m[11] * 255;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i];
+    const g = d[i + 1];
+    const b = d[i + 2];
+    d[i] = m[0] * r + m[1] * g + m[2] * b + o0;
+    d[i + 1] = m[4] * r + m[5] * g + m[6] * b + o1;
+    d[i + 2] = m[8] * r + m[9] * g + m[10] * b + o2;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// プレビューの CSS（radial-gradient ellipse farthest-corner, 透明 45% → 黒 100%）と同じ形
+function drawVignette(ctx, w, h, amount) {
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(w / Math.SQRT2, h / Math.SQRT2);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  g.addColorStop(0.45, 'rgba(0,0,0,0)');
+  g.addColorStop(1, `rgba(0,0,0,${amount})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(-1, -1, 2, 2);
+  ctx.restore();
+}
+
+function drawGrain(ctx, w, h, amount) {
+  const scale = Math.max(1, Math.min(w, h) / 1100);
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.globalAlpha = amount;
+  ctx.scale(scale, scale);
+  ctx.fillStyle = ctx.createPattern(grainTile(), 'repeat');
+  ctx.fillRect(0, 0, w / scale, h / scale);
+  ctx.restore();
+}
+
+// 昔のフィルムカメラ風の日付（7 セグメント表示）
+const SEGMENTS = {
+  0: 'abcdef', 1: 'bc', 2: 'abged', 3: 'abgcd', 4: 'fgbc',
+  5: 'afgcd', 6: 'afgedc', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg',
+};
+
+function stampText(d = new Date()) {
+  const p2 = (n) => String(n).padStart(2, ' ');
+  return `'${String(d.getFullYear()).slice(2)} ${p2(d.getMonth() + 1)} ${p2(d.getDate())}`;
+}
+
+function segAdvance(ch, size) {
+  if (ch === "'") return size * 0.3;
+  return size * 0.55 + size * 0.2;
+}
+
+function drawSevenSeg(ctx, text, x0, y0, size) {
+  const dw = size * 0.55;
+  const t = size * 0.13;
+  const gap = t * 0.18;
+  const skew = 0.1;
+  const path = new Path2D();
+  const poly = (pts, ox) => {
+    pts.forEach(([x, y], i) => {
+      const px = x0 + ox + x + (size - y) * skew;
+      const py = y0 + y;
+      if (i === 0) path.moveTo(px, py);
+      else path.lineTo(px, py);
+    });
+    path.closePath();
+  };
+  const hseg = (y, ox) => {
+    const x1 = gap;
+    const x2 = dw - gap;
+    poly([[x1, y], [x1 + t / 2, y - t / 2], [x2 - t / 2, y - t / 2], [x2, y], [x2 - t / 2, y + t / 2], [x1 + t / 2, y + t / 2]], ox);
+  };
+  const vseg = (x, y1, y2, ox) => {
+    const a = y1 + gap;
+    const b = y2 - gap;
+    poly([[x, a], [x + t / 2, a + t / 2], [x + t / 2, b - t / 2], [x, b], [x - t / 2, b - t / 2], [x - t / 2, a + t / 2]], ox);
+  };
+  const mid = size / 2;
+  let ox = 0;
+  for (const ch of text) {
+    const segs = SEGMENTS[ch];
+    if (segs) {
+      for (const s of segs) {
+        if (s === 'a') hseg(0, ox);
+        if (s === 'g') hseg(mid, ox);
+        if (s === 'd') hseg(size, ox);
+        if (s === 'f') vseg(0, 0, mid, ox);
+        if (s === 'e') vseg(0, mid, size, ox);
+        if (s === 'b') vseg(dw, 0, mid, ox);
+        if (s === 'c') vseg(dw, mid, size, ox);
+      }
+    } else if (ch === "'") {
+      poly([[t * 0.2, 0], [t * 1.2, 0], [t * 0.6, size * 0.28], [-t * 0.2, size * 0.28]], ox);
+    }
+    ox += segAdvance(ch, size);
+  }
+  ctx.save();
+  ctx.fillStyle = '#ff9a3c';
+  ctx.shadowColor = 'rgba(255, 96, 20, 0.95)';
+  ctx.shadowBlur = size * 0.45;
+  ctx.fill(path);
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = '#ffc27a';
+  ctx.fill(path);
+  ctx.restore();
+}
+
+function drawDateStamp(ctx, w, h) {
+  const base = Math.min(w, h);
+  const size = base * 0.042;
+  const text = stampText();
+  let width = 0;
+  for (const ch of text) width += segAdvance(ch, size);
+  const margin = base * 0.09;
+  drawSevenSeg(ctx, text, w - margin - width, h - margin - size, size);
+}
+
+function drawPreviewStamp() {
+  const on = prefs.date && mode === 'photo';
+  els.datestamp.hidden = !on;
+  if (!on) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(els.frame.clientWidth * dpr);
+  const h = Math.round(els.frame.clientHeight * dpr);
+  if (!w || !h) return;
+  els.datestamp.width = w;
+  els.datestamp.height = h;
+  drawDateStamp(els.datestamp.getContext('2d'), w, h);
 }
 
 /* ---------- 撮影 ---------- */
@@ -324,7 +666,7 @@ function onShutter() {
 
 function startCountdown(sec, action) {
   let n = sec;
-  els.countdown.textContent = n;
+  showCount(n);
   els.countdown.hidden = false;
   els.shutter.classList.add('counting');
   countdownTimer = setInterval(() => {
@@ -333,9 +675,16 @@ function startCountdown(sec, action) {
       cancelCountdown();
       action();
     } else {
-      els.countdown.textContent = n;
+      showCount(n);
     }
   }, 1000);
+}
+
+function showCount(n) {
+  els.countdown.textContent = n;
+  els.countdown.classList.remove('tick');
+  void els.countdown.offsetWidth;
+  els.countdown.classList.add('tick');
 }
 
 function cancelCountdown() {
@@ -357,16 +706,26 @@ async function takePhoto() {
   const h = v.videoHeight;
   if (!w || !h) return;
 
+  const look = currentLook();
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  canvas.getContext('2d').drawImage(v, 0, 0, w, h);
+  const ctx = canvas.getContext('2d');
+  const gpuFilter = look.css && canvasFilterWorks();
+  if (gpuFilter) ctx.filter = look.css;
+  ctx.drawImage(v, 0, 0, w, h);
+  ctx.filter = 'none';
   blink();
 
   try {
+    const createdAt = Date.now();
+    if (look.css && !gpuFilter) applyMatrix(ctx, w, h, cssFilterMatrix(look.css));
+    if (look.vignette) drawVignette(ctx, w, h, look.vignette);
+    if (look.grain) drawGrain(ctx, w, h, look.grain);
+    if (prefs.date) drawDateStamp(ctx, w, h);
     const blob = await canvasToBlob(canvas, 'image/jpeg', 0.92);
     const thumb = await makeThumb(canvas, w, h);
-    await addItem({ type: 'photo', blob, mime: 'image/jpeg', thumb, width: w, height: h, createdAt: Date.now(), saved: false });
+    await addItem({ type: 'photo', blob, mime: 'image/jpeg', thumb, width: w, height: h, look: look.id, createdAt, saved: false });
   } catch (err) {
     console.error(err);
     toast('写真を保存できませんでした');
@@ -475,11 +834,12 @@ async function finishRecording(rec, requestedMime) {
 }
 
 function updateRecTime() {
-  els.recTime.textContent = formatDuration((Date.now() - recStartedAt) / 1000);
+  els.statusText.textContent = `REC ${formatDuration((Date.now() - recStartedAt) / 1000)}`;
 }
 
 function setRecordingUI(on) {
-  els.rec.hidden = !on;
+  els.status.classList.toggle('recording', on);
+  if (!on) els.statusText.textContent = 'SILENT';
   els.shutter.classList.toggle('recording', on);
   els.shutter.setAttribute('aria-label', on ? '録画停止' : mode === 'video' ? '録画開始' : '撮影');
   for (const b of [els.btnFlip, els.btnGallery, els.btnLens, ...els.modes]) b.disabled = on;
@@ -572,6 +932,9 @@ async function addItem(item) {
   await dbPut(item);
   items.unshift(item);
   updateGalleryButton();
+  els.btnGallery.classList.remove('pop');
+  void els.btnGallery.offsetWidth;
+  els.btnGallery.classList.add('pop');
   if (!els.gallery.hidden) renderGallery();
 }
 
@@ -688,7 +1051,7 @@ function setSelectMode(on) {
 }
 
 function renderGallery() {
-  els.galleryTitle.textContent = `ライブラリ（${items.length}）`;
+  els.galleryCount.textContent = items.length ? `${items.length} SHOTS` : '';
   els.galleryEmpty.hidden = items.length > 0;
   els.galleryGrid.hidden = items.length === 0;
   els.btnSelect.disabled = items.length === 0;
@@ -708,7 +1071,13 @@ function renderGallery() {
       tile.append(img);
     }
     if (it.type === 'video') tile.append(tag('dur', `▶ ${formatDuration(it.duration || 0)}`));
-    if (it.saved) tile.append(tag('saved', '✓ 保存済'));
+    if (it.saved && !selectMode) {
+      const saved = tag('saved', '');
+      saved.innerHTML = '<svg><use href="#i-check"/></svg>';
+      saved.setAttribute('aria-label', '保存済み');
+      tile.append(saved);
+    }
+    if (selectMode) tile.append(tag('pick', ''));
 
     tile.addEventListener('click', () => {
       if (selectMode) {
@@ -734,15 +1103,15 @@ function tag(cls, text) {
 
 function updateGalleryActions() {
   if (selectMode) {
-    els.btnSaveMain.textContent = `保存（${selected.size}）`;
-    els.btnDeleteMain.textContent = `削除（${selected.size}）`;
+    els.btnSaveMain.textContent = `保存 ${selected.size}`;
+    els.btnDeleteMain.textContent = `削除 ${selected.size}`;
     els.btnSaveMain.disabled = selected.size === 0;
     els.btnDeleteMain.disabled = selected.size === 0;
   } else {
     const unsaved = items.filter((i) => !i.saved).length;
     const saved = items.length - unsaved;
-    els.btnSaveMain.textContent = `すべて保存（${unsaved}）`;
-    els.btnDeleteMain.textContent = `保存済を削除（${saved}）`;
+    els.btnSaveMain.textContent = `すべて保存 ${unsaved}`;
+    els.btnDeleteMain.textContent = `保存済を削除 ${saved}`;
     els.btnSaveMain.disabled = unsaved === 0;
     els.btnDeleteMain.disabled = saved === 0;
   }
@@ -799,7 +1168,7 @@ function renderViewer() {
   }
   media.src = getURL(it, 'full');
   els.viewerMedia.replaceChildren(media);
-  els.viewerInfo.textContent = `${viewIndex + 1} / ${items.length}・${formatDate(it.createdAt)}${it.saved ? '・保存済' : ''}`;
+  els.viewerInfo.textContent = `${viewIndex + 1}/${items.length}  ${formatDate(it.createdAt)}${it.saved ? '  SAVED' : ''}`;
 }
 
 function stepViewer(delta) {
@@ -858,6 +1227,12 @@ function bindEvents() {
     savePrefs();
     applyPrefsUI();
   });
+  els.btnDate.addEventListener('click', () => {
+    prefs.date = !prefs.date;
+    savePrefs();
+    applyPrefsUI();
+    toast(prefs.date ? '日付を写真に入れます' : '日付スタンプをオフにしました');
+  });
   els.btnTorch.addEventListener('click', toggleTorch);
   els.btnLens.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -868,11 +1243,13 @@ function bindEvents() {
     if (!els.lensMenu.hidden && !els.lensMenu.contains(e.target)) closeLensMenu();
   });
 
-  // ピンチでズーム
+  // ピンチでズーム、左右のスワイプでフィルター切り替え
   let pinch = null;
+  let swipe = null;
   const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   els.stage.addEventListener('touchstart', (e) => {
     if (e.touches.length === 2 && zoomCaps) pinch = { d: dist(e.touches), z: currentZoom };
+    swipe = e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
   }, { passive: true });
   els.stage.addEventListener('touchmove', (e) => {
     if (pinch && e.touches.length === 2) {
@@ -882,6 +1259,11 @@ function bindEvents() {
   }, { passive: false });
   els.stage.addEventListener('touchend', (e) => {
     if (e.touches.length < 2) pinch = null;
+    if (!swipe || e.touches.length) return;
+    const dx = e.changedTouches[0].clientX - swipe.x;
+    const dy = e.changedTouches[0].clientY - swipe.y;
+    swipe = null;
+    if (mode === 'photo' && !countdownTimer && Math.abs(dx) > 50 && Math.abs(dy) < 60) stepLook(dx < 0 ? 1 : -1);
   });
   // iOS Safari のページ拡大を止める
   document.addEventListener('gesturestart', (e) => e.preventDefault());
@@ -925,6 +1307,7 @@ function bindEvents() {
 }
 
 async function init() {
+  buildLooks();
   applyPrefsUI();
   bindEvents();
 

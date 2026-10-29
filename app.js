@@ -11,6 +11,7 @@ const $ = (sel) => document.querySelector(sel);
 
 const els = {
   camera: $('#camera'),
+  controls: $('#controls'),
   stage: $('#stage'),
   frame: $('#frame'),
   video: $('#preview'),
@@ -120,6 +121,7 @@ let mode = 'photo';
 let deviceId = null;
 let stream = null;
 let track = null;
+let micStream = null;
 let startSeq = 0;
 let lenses = [];
 let zoomCaps = null;
@@ -129,6 +131,7 @@ let zoomFrame = null;
 let torchOn = false;
 
 function stopCamera() {
+  stopMic();
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null;
   track = null;
@@ -149,24 +152,13 @@ async function startCamera() {
     return;
   }
 
-  const video = mode === 'photo'
-    ? { width: { ideal: 4032 }, height: { ideal: 3024 } }
-    : { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+  const video = videoConstraints();
   if (deviceId) video.deviceId = { exact: deviceId };
   else video.facingMode = { ideal: prefs.facing };
 
   let s;
-  let noMic = false;
   try {
-    if (mode === 'video') {
-      try {
-        s = await navigator.mediaDevices.getUserMedia({ video, audio: true });
-      } catch (err) {
-        if (err.name !== 'NotAllowedError' && err.name !== 'NotFoundError') throw err;
-        noMic = true;
-      }
-    }
-    if (!s) s = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+    s = await navigator.mediaDevices.getUserMedia({ video, audio: false });
   } catch (err) {
     if (seq !== startSeq) return;
     if (deviceId) {
@@ -197,11 +189,37 @@ async function startCamera() {
   const facing = settings.facingMode || (deviceId ? guessFacing(track.label) : prefs.facing);
   els.video.classList.toggle('mirror', facing === 'user');
 
-  if (noMic) toast('マイクが使えないため音声なしで録画します');
+  if (mode === 'video') ensureMic();
   fitFrame();
   setupCapabilities();
   updateHud();
   refreshLenses();
+}
+
+function videoConstraints() {
+  return mode === 'photo'
+    ? { width: { ideal: 4032 }, height: { ideal: 3024 } }
+    : { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+}
+
+// マイクは映像とは別に取る。モード切り替えのたびにカメラを止めずに済むように
+async function ensureMic() {
+  if (micStream?.getAudioTracks().some((t) => t.readyState === 'live')) return;
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (mode !== 'video' || !stream) {
+      s.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    micStream = s;
+  } catch {
+    toast('マイクが使えないため音声なしで録画します');
+  }
+}
+
+function stopMic() {
+  if (micStream) micStream.getTracks().forEach((t) => t.stop());
+  micStream = null;
 }
 
 function cameraErrorText(err) {
@@ -225,16 +243,24 @@ function guessFacing(label = '') {
 }
 
 // プレビュー枠を映像と同じ縦横比にして、写る範囲＝保存される範囲にする
+// 横幅いっぱいに表示する。ボタンの上に収まるなら上の空きの中央に、
+// 収まらない（ビデオの縦長映像など）ならボタンの裏まで伸ばす
 function fitFrame() {
-  const vw = els.video.videoWidth;
-  const vh = els.video.videoHeight;
-  if (!vw || !vh) return;
+  const vw = els.video.videoWidth || 3;
+  const vh = els.video.videoHeight || 4;
   const cs = getComputedStyle(els.stage);
   const sw = els.stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-  const sh = els.stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
-  const scale = Math.min(sw / vw, sh / vh);
-  els.frame.style.width = `${Math.floor(vw * scale)}px`;
-  els.frame.style.height = `${Math.floor(vh * scale)}px`;
+  const sh = els.stage.clientHeight;
+  const above = sh - els.controls.offsetHeight;
+  let w = sw;
+  let h = (sw * vh) / vw;
+  if (h > sh) {
+    h = sh;
+    w = (sh * vw) / vh;
+  }
+  els.frame.style.width = `${Math.floor(w)}px`;
+  els.frame.style.height = `${Math.floor(h)}px`;
+  els.frame.style.top = `${Math.max(0, Math.floor((above - h) / 2))}px`;
   drawPreviewStamp();
 }
 
@@ -337,7 +363,33 @@ function setMode(next) {
   els.camera.classList.toggle('mode-video', mode === 'video');
   applyLook();
   drawPreviewStamp();
-  startCamera();
+  switchResolution();
+}
+
+// カメラを止めずに解像度だけ変える（止めて付け直すと画面が一瞬消えてがくっとするため）
+async function switchResolution() {
+  const t = track;
+  if (!t) {
+    startCamera();
+    return;
+  }
+  try {
+    await t.applyConstraints(videoConstraints());
+  } catch {
+    startCamera();
+    return;
+  }
+  if (t !== track) return;
+  const { width = 0, height = 0 } = t.getSettings?.() || {};
+  if (mode === 'photo' && Math.max(width, height) < 2000) {
+    // 解像度を上げられなかったときだけ付け直す
+    startCamera();
+    return;
+  }
+  if (mode === 'video') ensureMic();
+  else stopMic();
+  setupCapabilities();
+  updateHud();
 }
 
 /* ---------- フィルター・日付スタンプ・画面上の表示 ---------- */
@@ -771,7 +823,8 @@ async function startRecording() {
   const mime = pickVideoMime();
   let rec;
   try {
-    rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const tracks = [...stream.getVideoTracks(), ...(micStream?.getAudioTracks() || [])];
+    rec = new MediaRecorder(new MediaStream(tracks), mime ? { mimeType: mime } : undefined);
   } catch (err) {
     console.error(err);
     toast('録画を開始できませんでした');
@@ -1269,7 +1322,10 @@ function bindEvents() {
   document.addEventListener('gesturestart', (e) => e.preventDefault());
 
   els.video.addEventListener('loadedmetadata', fitFrame);
-  els.video.addEventListener('resize', fitFrame);
+  els.video.addEventListener('resize', () => {
+    fitFrame();
+    updateHud();
+  });
   window.addEventListener('resize', fitFrame);
 
   els.btnGalleryClose.addEventListener('click', closeGallery);
@@ -1309,6 +1365,7 @@ function bindEvents() {
 async function init() {
   buildLooks();
   applyPrefsUI();
+  fitFrame();
   bindEvents();
 
   try {

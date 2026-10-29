@@ -88,6 +88,7 @@ svg {
   inset: 0;
   display: grid;
   grid-template-rows: auto 1fr auto;
+  grid-template-columns: 100%;
   background:
     radial-gradient(90% 45% at 50% -8%, rgba(139, 123, 255, 0.22), transparent 70%),
     radial-gradient(70% 35% at 50% 108%, rgba(94, 231, 255, 0.10), transparent 70%),
@@ -190,20 +191,24 @@ svg {
   text-align: center;
 }
 
+/* ファインダーは下のボタンの裏まで使える（ビデオの縦長映像を大きく見せるため） */
 #stage {
+  grid-row: 2 / 4;
+  grid-column: 1;
   position: relative;
   min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   padding: 0 10px;
   touch-action: none;
 }
 
 #frame {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  transition: width 0.45s var(--ease), height 0.45s var(--ease), top 0.45s var(--ease);
   overflow: hidden;
   border-radius: 22px;
   background: #0d0c14;
@@ -384,7 +389,7 @@ svg {
 
 #zoom-label {
   position: absolute;
-  bottom: 22px;
+  top: 46px;
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 12px;
@@ -460,7 +465,17 @@ svg {
 /* ---------- controls ---------- */
 
 #controls {
+  grid-row: 3;
+  grid-column: 1;
+  position: relative;
+  z-index: 3;
   padding: 12px 0 calc(env(safe-area-inset-bottom) + 14px);
+  background: linear-gradient(rgba(6, 5, 9, 0), rgba(6, 5, 9, 0.55) 45%, rgba(6, 5, 9, 0.8));
+  pointer-events: none;
+}
+
+#controls > * {
+  pointer-events: auto;
 }
 
 #looks {

@@ -208,7 +208,8 @@ svg {
   width: 0;
   height: 0;
   transform: translateX(-50%);
-  transition: width 0.45s var(--ease), height 0.45s var(--ease), top 0.45s var(--ease);
+  /* 大きさはアニメーションさせない。iPhone では動いている途中の大きさで映像が固まり、
+     枠の中に小さく描かれたままになることがあるため（切り替えはぼかしで隠す） */
   overflow: hidden;
   border-radius: 22px;
   background: #0d0c14;

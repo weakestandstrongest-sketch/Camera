@@ -1434,10 +1434,6 @@ function bindEvents() {
   els.video.addEventListener('loadedmetadata', scheduleSettle);
   els.video.addEventListener('resize', scheduleSettle);
   window.addEventListener('resize', () => fitFrame());
-  // 枠の大きさのアニメーションが終わってから、日付スタンプを新しい大きさで描き直す
-  els.frame.addEventListener('transitionend', (e) => {
-    if (e.target === els.frame && e.propertyName === 'height') drawPreviewStamp();
-  });
 
   els.btnGalleryClose.addEventListener('click', closeGallery);
   els.btnSelect.addEventListener('click', () => setSelectMode(!selectMode));

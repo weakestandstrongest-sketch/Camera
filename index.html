@@ -14,7 +14,13 @@
   <link rel="icon" type="image/png" href="icons/lens-192.png">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="booting">
+  <!-- 起動アニメーション -->
+  <div id="intro" aria-hidden="true">
+    <div class="intro-lens"><i></i><i></i><i></i></div>
+    <div class="intro-word"><b>SILENT</b><span>CAMERA</span></div>
+  </div>
+
   <!-- 画面で使うアイコン -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
@@ -35,11 +41,11 @@
 
   <main id="camera" class="mode-photo">
     <header id="topbar">
-      <div id="status" class="glass">
+      <div id="status" class="glass boot" style="--d: 0.05s">
         <span class="status-dot"></span>
         <span id="status-text">SILENT</span>
       </div>
-      <div id="tools" class="glass">
+      <div id="tools" class="glass boot" style="--d: 0.12s">
         <button id="btn-grid" class="tool" aria-label="グリッド" aria-pressed="false"><svg><use href="#i-grid"/></svg></button>
         <button id="btn-timer" class="tool" aria-label="セルフタイマー" aria-pressed="false"><svg><use href="#i-timer"/></svg><span id="timer-badge" hidden></span></button>
         <button id="btn-date" class="tool photo-only" aria-label="日付スタンプ" aria-pressed="false"><svg><use href="#i-date"/></svg></button>
@@ -53,6 +59,7 @@
         <video id="preview" autoplay playsinline muted></video>
         <div id="look-vignette"></div>
         <div id="look-grain"></div>
+        <div id="veil"></div>
         <div id="grid" hidden></div>
         <div id="brackets"><i></i><i></i><i></i><i></i></div>
         <canvas id="datestamp" hidden></canvas>
@@ -72,12 +79,12 @@
     </div>
 
     <footer id="controls">
-      <div id="looks" class="photo-only" role="radiogroup" aria-label="フィルター"></div>
-      <div id="modes">
+      <div id="looks" class="photo-only boot" style="--d: 0.22s" role="radiogroup" aria-label="フィルター"></div>
+      <div id="modes" class="boot" style="--d: 0.28s">
         <button class="mode active" data-mode="photo" aria-label="写真">PHOTO</button>
         <button class="mode" data-mode="video" aria-label="ビデオ">VIDEO</button>
       </div>
-      <div id="shutter-row">
+      <div id="shutter-row" class="boot" style="--d: 0.34s">
         <button id="btn-gallery" aria-label="ライブラリ">
           <img id="thumb" alt="" hidden>
           <span id="badge" hidden></span>

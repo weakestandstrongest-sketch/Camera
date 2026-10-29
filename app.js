@@ -32,6 +32,8 @@ const els = {
   message: $('#message'),
   messageText: $('#message-text'),
   btnRetry: $('#btn-retry'),
+  veil: $('#veil'),
+  intro: $('#intro'),
   btnGrid: $('#btn-grid'),
   btnTimer: $('#btn-timer'),
   timerBadge: $('#timer-badge'),
@@ -140,6 +142,7 @@ function stopCamera() {
 
 async function startCamera() {
   const seq = ++startSeq;
+  startSwitch();
   stopCamera();
   hideMessage();
 
@@ -190,10 +193,37 @@ async function startCamera() {
   els.video.classList.toggle('mirror', facing === 'user');
 
   if (mode === 'video') ensureMic();
-  fitFrame();
+  scheduleSettle();
   setupCapabilities();
   updateHud();
   refreshLenses();
+}
+
+// カメラの起動・切り替え直後は、iPhone が一瞬ちがう映像サイズを報告してから落ち着く。
+// そのたびに枠の大きさを変えるとがくっとするので、サイズが落ち着くまで待ち、その間はぼかしで隠す
+let settleTimer = null;
+let veilTimer = null;
+
+function startSwitch() {
+  els.veil.classList.add('on');
+  clearTimeout(veilTimer);
+  veilTimer = setTimeout(endSwitch, 2500);
+}
+
+function endSwitch() {
+  clearTimeout(veilTimer);
+  els.veil.classList.remove('on');
+}
+
+function scheduleSettle() {
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => {
+    if (!els.video.videoWidth) return;
+    fitFrame();
+    updateHud();
+    setTimeout(endSwitch, 150);
+    cameraReady();
+  }, 350);
 }
 
 function videoConstraints() {
@@ -363,6 +393,7 @@ function setMode(next) {
   els.camera.classList.toggle('mode-video', mode === 'video');
   applyLook();
   drawPreviewStamp();
+  startSwitch();
   switchResolution();
 }
 
@@ -389,7 +420,7 @@ async function switchResolution() {
   if (mode === 'video') ensureMic();
   else stopMic();
   setupCapabilities();
-  updateHud();
+  scheduleSettle();
 }
 
 /* ---------- フィルター・日付スタンプ・画面上の表示 ---------- */
@@ -1243,6 +1274,8 @@ async function onViewerDelete() {
 /* ---------- メッセージ・トースト ---------- */
 
 function showMessage(text, canRetry) {
+  endSwitch();
+  cameraReady();
   els.messageText.textContent = text;
   els.messageText.style.whiteSpace = 'pre-line';
   els.btnRetry.hidden = !canRetry;
@@ -1321,11 +1354,8 @@ function bindEvents() {
   // iOS Safari のページ拡大を止める
   document.addEventListener('gesturestart', (e) => e.preventDefault());
 
-  els.video.addEventListener('loadedmetadata', fitFrame);
-  els.video.addEventListener('resize', () => {
-    fitFrame();
-    updateHud();
-  });
+  els.video.addEventListener('loadedmetadata', scheduleSettle);
+  els.video.addEventListener('resize', scheduleSettle);
   window.addEventListener('resize', fitFrame);
 
   els.btnGalleryClose.addEventListener('click', closeGallery);
@@ -1384,10 +1414,28 @@ async function init() {
   navigator.storage?.persist?.().catch(() => {});
 
   startCamera();
+  setTimeout(cameraReady, 3500); // カメラがなかなか起動しなくても、起動画面は閉じる
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
+}
+
+/* ---------- 起動アニメーション ---------- */
+
+let introDone = false;
+
+// カメラの映像が落ち着いたら、レンズが開いて撮影画面に入る
+function cameraReady() {
+  if (introDone) return;
+  introDone = true;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const wait = reduce ? 0 : Math.max(0, 1400 - performance.now());
+  setTimeout(() => {
+    els.intro.classList.add('out');
+    document.body.classList.replace('booting', 'booted');
+    setTimeout(() => els.intro.remove(), 1000);
+  }, wait);
 }
 
 init();

@@ -1473,18 +1473,108 @@ async function init() {
 /* ---------- 起動アニメーション ---------- */
 
 let introDone = false;
+let irisRot = 0;
+let irisFrame = null;
 
-// カメラの映像が落ち着いたら、レンズが開いて撮影画面に入る
+const IRIS_BLADES = 7;
+const IRIS_SHADES = ['#110f1c', '#151324', '#0f0d19', '#131121', '#100e1b', '#161427', '#0e0c17'];
+
+// 絞り（アイリス）を描く。open は 0（閉じている）〜 1（画面の外まで開いている）
+function drawIris(open, rot) {
+  const svg = $('#iris');
+  if (!svg) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const cx = w / 2;
+  const cy = h / 2;
+  const reach = Math.hypot(w, h) / 2;
+  // 多角形の穴の内接円が画面の角まで届くように開く
+  const r = open * (reach / Math.cos(Math.PI / IRIS_BLADES)) * 1.02;
+  const outer = reach + r + 20;
+  const step = (2 * Math.PI) / IRIS_BLADES;
+  const verts = [];
+  const hits = [];
+  for (let k = 0; k < IRIS_BLADES; k++) {
+    const a = rot + k * step;
+    const v = [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    verts.push(v);
+    // 頂点から、となりの頂点と逆の向きに辺を伸ばして外側の円とぶつかる点
+    const d = a + step / 2 - Math.PI / 2;
+    const dx = Math.cos(d);
+    const dy = Math.sin(d);
+    const fx = v[0] - cx;
+    const fy = v[1] - cy;
+    const b = fx * dx + fy * dy;
+    const c = fx * fx + fy * fy - outer * outer;
+    const t = -b + Math.sqrt(b * b - c);
+    hits.push([v[0] + dx * t, v[1] + dy * t]);
+  }
+  const pt = ([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`;
+  let paths = '';
+  for (let k = 0; k < IRIS_BLADES; k++) {
+    const n = (k + 1) % IRIS_BLADES;
+    let a0 = Math.atan2(hits[k][1] - cy, hits[k][0] - cx);
+    let a1 = Math.atan2(hits[n][1] - cy, hits[n][0] - cx);
+    while (a1 < a0) a1 += 2 * Math.PI;
+    let d = `M${pt(verts[k])} L${pt(hits[k])}`;
+    for (let i = 1; i <= 12; i++) {
+      const a = a0 + ((a1 - a0) * i) / 12;
+      d += ` L${pt([cx + outer * Math.cos(a), cy + outer * Math.sin(a)])}`;
+    }
+    d += ` L${pt(verts[n])} Z`;
+    paths += `<path d="${d}" fill="${IRIS_SHADES[k]}" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>`;
+  }
+  // 穴のふちを、アイコンと同じオーロラ色で光らせる
+  if (open > 0) {
+    const rim = verts.map(pt).join(' ');
+    paths += `<polygon points="${rim}" fill="none" stroke="url(#aurora-stroke)" stroke-width="2" opacity="${(1 - open).toFixed(2)}"/>`;
+  }
+  svg.innerHTML = paths;
+}
+
+// 閉じている間は、羽根がゆっくり回る
+function idleIris() {
+  irisRot += 0.0025;
+  drawIris(0, irisRot);
+  irisFrame = requestAnimationFrame(idleIris);
+}
+
+function openIris() {
+  cancelAnimationFrame(irisFrame);
+  els.intro.classList.add('opening');
+  document.body.classList.replace('booting', 'booted');
+  const start = performance.now();
+  const from = irisRot;
+  const duration = 1000;
+  const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+  (function step(now) {
+    const t = Math.min(1, (now - start) / duration);
+    const e = ease(t);
+    drawIris(e, from + e * 0.9);
+    if (t < 1) requestAnimationFrame(step);
+    else els.intro.remove();
+  })(start);
+}
+
+// カメラの映像が落ち着いたら、絞りが開いて撮影画面に入る
 function cameraReady() {
   if (introDone) return;
   introDone = true;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const wait = reduce ? 0 : Math.max(0, 1400 - performance.now());
-  setTimeout(() => {
-    els.intro.classList.add('out');
+  if (reduce) {
     document.body.classList.replace('booting', 'booted');
-    setTimeout(() => els.intro.remove(), 1000);
+    els.intro.remove();
+    return;
+  }
+  // ロゴが出そろうまでは待つ
+  const wait = Math.max(0, 1700 - performance.now());
+  setTimeout(() => {
+    els.intro.querySelector('.intro-logo').style.transitionDelay = '0s';
+    els.intro.classList.add('opening');
+    setTimeout(openIris, 220);
   }, wait);
 }
+
+idleIris();
 
 init();

@@ -1,7 +1,7 @@
 // オフラインでも起動できるように画面のファイルをキャッシュする。
 // つながるときは毎回サーバーの最新版を使い、つながらないときだけキャッシュを使う
 // （古いアイコンや画面が残り続けないように）。
-const CACHE = 'silent-camera-v13';
+const CACHE = 'silent-camera-v14';
 const ASSETS = [
   './',
   './index.html',

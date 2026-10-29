@@ -181,10 +181,18 @@ async function startCamera() {
 
   stream = s;
   track = s.getVideoTracks()[0];
-  boundDims = null;
-  els.video.srcObject = s;
+  // 映像を映す部品（video 要素）も毎回新しく作る。
+  // 前の映像の大きさなどの状態が残って、枠の中に小さく描かれたりしないように
+  const v = createPreview();
+  const old = els.video;
+  old.removeAttribute('id');
+  old.srcObject = null;
+  old.replaceWith(v);
+  els.video = v;
+  applyLook();
+  v.srcObject = s;
   try {
-    await els.video.play();
+    await v.play();
   } catch {
     // autoplay は muted + playsinline なので通常は失敗しない
   }
@@ -271,36 +279,13 @@ function scheduleSettle() {
   settleTimer = setTimeout(() => settle([w, h]), 150);
 }
 
-let boundDims = null; // video 要素に映像をつないだときのサイズ
-
-async function settle(dims) {
+function settle(dims) {
   clearTimeout(settleTimer);
   clearTimeout(fallbackTimer);
   fitFrame(dims);
   updateHud();
   cameraReady();
-  const key = dims.join('x');
-  if (boundDims && boundDims !== key) {
-    // 映像の途中で解像度が変わると、iPhone は少しの間、絵を古い大きさのまま小さく描く。
-    // ぼかしで隠している間に映像をつなぎ直して、正しい大きさで描かせてからぼかしを外す
-    boundDims = key;
-    await rebindVideo();
-  }
-  boundDims = key;
   setTimeout(endSwitch, 150);
-}
-
-function rebindVideo() {
-  const v = els.video;
-  if (!stream) return Promise.resolve();
-  v.srcObject = null;
-  v.srcObject = stream;
-  v.play().catch(() => {});
-  return new Promise((resolve) => {
-    const done = () => requestAnimationFrame(() => requestAnimationFrame(resolve));
-    v.addEventListener('playing', done, { once: true });
-    setTimeout(resolve, 800);
-  });
 }
 
 function videoConstraints() {
@@ -327,6 +312,20 @@ async function ensureMic() {
 function stopMic() {
   if (micStream) micStream.getTracks().forEach((t) => t.stop());
   micStream = null;
+}
+
+function createPreview() {
+  const v = document.createElement('video');
+  v.id = 'preview';
+  v.autoplay = true;
+  v.muted = true;
+  v.playsInline = true;
+  v.setAttribute('autoplay', '');
+  v.setAttribute('muted', '');
+  v.setAttribute('playsinline', '');
+  v.addEventListener('loadedmetadata', scheduleSettle);
+  v.addEventListener('resize', scheduleSettle);
+  return v;
 }
 
 function cameraErrorText(err) {
@@ -470,35 +469,10 @@ function setMode(next) {
   els.camera.classList.toggle('mode-video', mode === 'video');
   applyLook();
   drawPreviewStamp();
-  startSwitch();
-  switchResolution();
+  // モードが変わったら、カメラも映像の部品もいったん捨てて 1 から作り直す
+  startCamera();
 }
 
-// カメラを止めずに解像度だけ変える（止めて付け直すと画面が一瞬消えてがくっとするため）
-async function switchResolution() {
-  const t = track;
-  if (!t) {
-    startCamera();
-    return;
-  }
-  try {
-    await t.applyConstraints(videoConstraints());
-  } catch {
-    startCamera();
-    return;
-  }
-  if (t !== track) return;
-  const { width = 0, height = 0 } = t.getSettings?.() || {};
-  if (mode === 'photo' && Math.max(width, height) < 2000) {
-    // 解像度を上げられなかったときだけ付け直す
-    startCamera();
-    return;
-  }
-  if (mode === 'video') ensureMic();
-  else stopMic();
-  setupCapabilities();
-  scheduleSettle();
-}
 
 /* ---------- フィルター・日付スタンプ・画面上の表示 ---------- */
 
@@ -1431,8 +1405,6 @@ function bindEvents() {
   // iOS Safari のページ拡大を止める
   document.addEventListener('gesturestart', (e) => e.preventDefault());
 
-  els.video.addEventListener('loadedmetadata', scheduleSettle);
-  els.video.addEventListener('resize', scheduleSettle);
   window.addEventListener('resize', () => fitFrame());
 
   els.btnGalleryClose.addEventListener('click', closeGallery);

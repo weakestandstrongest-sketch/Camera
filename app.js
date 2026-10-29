@@ -181,6 +181,7 @@ async function startCamera() {
 
   stream = s;
   track = s.getVideoTracks()[0];
+  boundDims = null;
   els.video.srcObject = s;
   try {
     await els.video.play();
@@ -270,13 +271,36 @@ function scheduleSettle() {
   settleTimer = setTimeout(() => settle([w, h]), 150);
 }
 
-function settle(dims) {
+let boundDims = null; // video 要素に映像をつないだときのサイズ
+
+async function settle(dims) {
   clearTimeout(settleTimer);
   clearTimeout(fallbackTimer);
   fitFrame(dims);
   updateHud();
-  setTimeout(endSwitch, 150);
   cameraReady();
+  const key = dims.join('x');
+  if (boundDims && boundDims !== key) {
+    // 映像の途中で解像度が変わると、iPhone は少しの間、絵を古い大きさのまま小さく描く。
+    // ぼかしで隠している間に映像をつなぎ直して、正しい大きさで描かせてからぼかしを外す
+    boundDims = key;
+    await rebindVideo();
+  }
+  boundDims = key;
+  setTimeout(endSwitch, 150);
+}
+
+function rebindVideo() {
+  const v = els.video;
+  if (!stream) return Promise.resolve();
+  v.srcObject = null;
+  v.srcObject = stream;
+  v.play().catch(() => {});
+  return new Promise((resolve) => {
+    const done = () => requestAnimationFrame(() => requestAnimationFrame(resolve));
+    v.addEventListener('playing', done, { once: true });
+    setTimeout(resolve, 800);
+  });
 }
 
 function videoConstraints() {
